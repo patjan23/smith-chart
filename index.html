@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smith Chart</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  #header {
+    padding: 10px 20px;
+    background: rgba(0,0,0,0.6);
+    border-bottom: 1px solid #1a3a1a;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    z-index: 10;
+  }
+  #header h1 {
+    font-size: 1.2rem;
+    color: #00ff88;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+  }
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+  #canvas-container {
+    flex: 1;
+    position: relative;
+  }
+  canvas { display: block; }
+  #panel {
+    width: 280px;
+    background: rgba(5,15,5,0.95);
+    border-left: 1px solid #1a3a1a;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+  .field-group label {
+    display: block;
+    font-size: 0.65rem;
+    color: #00aa55;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .field-group input {
+    width: 100%;
+    background: #050f05;
+    border: 1px solid #1a3a1a;
+    color: #00ff88;
+    padding: 8px 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .field-group input:focus { border-color: #00ff88; }
+  #plot-btn {
+    background: transparent;
+    border: 1px solid #00ff88;
+    color: #00ff88;
+    padding: 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    letter-spacing: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  #plot-btn:hover { background: #00ff88; color: #000; }
+  .results { border-top: 1px solid #1a3a1a; padding-top: 16px; }
+  .results h3 {
+    font-size: 0.65rem;
+    color: #00aa55;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+  .result-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .result-label { color: #99bbaa; }
+  .result-val { color: #00ff88; text-align: right; }
+  #status {
+    font-size: 0.65rem;
+    color: #88bb88;
+    letter-spacing: 1px;
+    text-align: center;
+    padding: 4px 0;
+  }
+  .divider { border-top: 1px solid #1a3a1a; }
+  .tip {
+    font-size: 0.6rem;
+    color: #88aa88;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>⬡ Smith Chart</h1>
+  <span style="font-size:0.65rem;color:#446644;letter-spacing:2px;">IMPEDANCE / ADMITTANCE LOCUS PLOTTER</span>
+</div>
+
+<div id="main">
+  <div id="canvas-container">
+    <canvas id="chart"></canvas>
+  </div>
+  <div id="panel">
+    <div class="field-group">
+      <label>Characteristic Impedance Z₀ (Ω)</label>
+      <input type="number" id="z0" value="50" step="1">
+    </div>
+    <div class="field-group">
+      <label>Resistance R (Ω)</label>
+      <input type="number" id="R" value="100" step="1">
+    </div>
+    <div class="field-group">
+      <label>Reactance X (Ω)</label>
+      <input type="number" id="X" value="50" step="1">
+    </div>
+    <button id="plot-btn" onclick="plotPoint()">▶ PLOT POINT</button>
+    <div id="status">READY</div>
+
+    <div class="divider"></div>
+    <div class="results" id="results" style="display:none;">
+      <h3>Computed Parameters</h3>
+      <div class="result-row">
+        <span class="result-label">Norm. Impedance</span>
+        <span class="result-val" id="res-z"></span>
+      </div>
+      <div class="result-row">
+        <span class="result-label">Norm. Admittance</span>
+        <span class="result-val" id="res-y"></span>
+      </div>
+      <div class="result-row">
+        <span class="result-label">|Γ|</span>
+        <span class="result-val" id="res-k"></span>
+      </div>
+      <div class="result-row">
+        <span class="result-label">∠Γ</span>
+        <span class="result-val" id="res-theta"></span>
+      </div>
+      <div class="result-row">
+        <span class="result-label">VSWR</span>
+        <span class="result-val" id="res-vswr"></span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="tip">
+      GREEN circles = constant resistance (r)<br>
+      CYAN arcs = constant reactance (x)<br>
+      RED = plotted impedance point<br>
+      WHITE circle = VSWR locus<br>
+      BLUE = conjugate / admittance
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+let W, H, CX, CY, RADIUS;
+
+function resize() {
+  const container = document.getElementById('canvas-container');
+  W = container.clientWidth;
+  H = container.clientHeight;
+  canvas.width = W;
+  canvas.height = H;
+  RADIUS = Math.min(W, H) * 0.44;
+  CX = W / 2;
+  CY = H / 2;
+  drawChart();
+}
+
+// Convert normalised chart coords (u in [-1,1], v in [-1,1]) to canvas px
+function toCanvas(u, v) {
+  return [CX + u * RADIUS, CY - v * RADIUS];
+}
+
+// Draw a constant-r circle.
+// Center in Gamma-plane: (r/(r+1), 0), radius 1/(r+1)
+function drawRCircle(r, color, lw) {
+  const cx = r / (r + 1);
+  const rad = 1 / (r + 1);
+  const [pcx, pcy] = toCanvas(cx, 0);
+  ctx.beginPath();
+  ctx.arc(pcx, pcy, rad * RADIUS, 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+}
+
+// Draw a constant-x arc.
+// Center in Gamma-plane: (1, 1/x), radius 1/|x|
+function drawXArc(x, color, lw) {
+  if (Math.abs(x) < 1e-10) return;
+  const cx = 1;
+  const cy = 1 / x;
+  const rad = Math.abs(1 / x);
+  const [pcx, pcy] = toCanvas(cx, cy);
+  // The arc lives inside the unit circle, clip it
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(CX, CY, RADIUS, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.beginPath();
+  ctx.arc(pcx, pcy, rad * RADIUS, 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGrid() {
+  // Outer boundary circle
+  ctx.beginPath();
+  ctx.arc(CX, CY, RADIUS, 0, Math.PI * 2);
+  ctx.strokeStyle = '#00ff88';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Resistance circles (r = 0, 0.2, 0.5, 1, 2, 5, 10, 20, 50)
+  const rValues = [0, 0.2, 0.5, 1, 2, 5, 10, 20];
+  rValues.forEach(r => {
+    const major = [0, 0.5, 1, 2].includes(r);
+    drawRCircle(r, major ? '#00cc66' : '#004422', major ? 0.8 : 0.5);
+  });
+
+  // Reactance arcs (x = ±0.2, ±0.5, ±1, ±2, ±5)
+  const xValues = [0.2, 0.5, 1, 2, 5, 10, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9,
+                   1.5, 3, 4];
+  xValues.forEach(x => {
+    const major = [0.5, 1, 2, 5].includes(x);
+    drawXArc( x, major ? '#006688' : '#002233', major ? 0.8 : 0.4);
+    drawXArc(-x, major ? '#006688' : '#002233', major ? 0.8 : 0.4);
+  });
+
+  // Centre crosshairs
+  ctx.strokeStyle = '#224422';
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath();
+  ctx.moveTo(CX - RADIUS, CY);
+  ctx.lineTo(CX + RADIUS, CY);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(CX, CY - RADIUS);
+  ctx.lineTo(CX, CY + RADIUS);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Labels along real axis
+  ctx.fillStyle = '#99ddaa';
+  ctx.font = `${Math.max(10, RADIUS * 0.032)}px Courier New`;
+  ctx.textAlign = 'center';
+  const rLabels = [[0,'0'],[0.5,'0.5'],[1,'1'],[2,'2'],[5,'5']];
+  rLabels.forEach(([r, label]) => {
+    const u = r / (r + 1) * 2 - 1; // map r->Gamma_r then to [-1,1]
+    // Gamma_r for a real load = (r-1)/(r+1)
+    const gamma_r = (r - 1) / (r + 1);
+    const [px] = toCanvas(gamma_r, 0);
+    ctx.fillText(label, px, CY + 14);
+  });
+}
+
+function drawChart() {
+  ctx.clearRect(0, 0, W, H);
+  // Background
+  ctx.fillStyle = '#05090a';
+  ctx.fillRect(0, 0, W, H);
+  // Subtle radial glow at centre
+  const grd = ctx.createRadialGradient(CX, CY, 0, CX, CY, RADIUS);
+  grd.addColorStop(0, 'rgba(0,60,30,0.15)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+
+  drawGrid();
+}
+
+let lastPoint = null;
+
+function plotPoint() {
+  const z0 = parseFloat(document.getElementById('z0').value) || 50;
+  const R  = parseFloat(document.getElementById('R').value)  || 100;
+  const X  = parseFloat(document.getElementById('X').value)  || 0;
+
+  const t   = R / z0;   // normalised r
+  const l1  = X / z0;   // normalised x
+
+  // Reflection coefficient
+  const denom = (t + 1) * (t + 1) + l1 * l1;
+  const kr = (t * t + l1 * l1 - 1) / denom;
+  const kx = (2 * l1) / denom;
+  const k  = Math.sqrt(kr * kr + kx * kx);
+  const theta = Math.atan2(kx, kr) * 180 / Math.PI;
+
+  // Admittance
+  const yrr =  t / (t * t + l1 * l1);
+  const yrx = -l1 / (t * t + l1 * l1);
+  const vswr = (1 + k) / (1 - k);
+
+  lastPoint = { kr, kx, k, theta, t, l1, yrr, yrx, vswr };
+
+  // Redraw clean chart
+  drawChart();
+
+  // VSWR circle
+  const vswrRad = k * RADIUS;
+  ctx.beginPath();
+  ctx.arc(CX, CY, vswrRad, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Impedance point A
+  const [ax, ay] = toCanvas(kr, kx);
+  ctx.beginPath();
+  ctx.arc(ax, ay, 7, 0, Math.PI * 2);
+  ctx.fillStyle = '#ff4444';
+  ctx.fill();
+  ctx.strokeStyle = '#ff8888';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffcccc';
+  ctx.font = 'bold 11px Courier New';
+  ctx.textAlign = 'left';
+  ctx.fillText('Z  (A)', ax + 10, ay - 6);
+
+  // Conjugate point B (flip kx sign)
+  const [bx, by] = toCanvas(kr, -kx);
+  ctx.beginPath();
+  ctx.arc(bx, by, 6, 0, Math.PI * 2);
+  ctx.fillStyle = '#4488ff';
+  ctx.fill();
+  ctx.fillStyle = '#ccddff';
+  ctx.fillText('Z* (B)', bx + 10, by - 6);
+
+  // Admittance point (diametrically opposite on VSWR circle)
+  const [cx2, cy2] = toCanvas(-kr, -kx);
+  ctx.beginPath();
+  ctx.arc(cx2, cy2, 6, 0, Math.PI * 2);
+  ctx.fillStyle = '#44ffcc';
+  ctx.fill();
+  ctx.fillStyle = '#ccffee';
+  ctx.fillText('Y  (C)', cx2 + 10, cy2 - 6);
+
+  // Line AB
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.strokeStyle = 'rgba(100,150,255,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Results panel
+  document.getElementById('results').style.display = 'block';
+  document.getElementById('res-z').textContent =
+    `${t.toFixed(4)} ${l1 >= 0 ? '+' : ''}${l1.toFixed(4)}j`;
+  document.getElementById('res-y').textContent =
+    `${yrr.toFixed(4)} ${yrx >= 0 ? '+' : ''}${yrx.toFixed(4)}j`;
+  document.getElementById('res-k').textContent = k.toFixed(4);
+  document.getElementById('res-theta').textContent = theta.toFixed(2) + '°';
+  document.getElementById('res-vswr').textContent =
+    isFinite(vswr) ? vswr.toFixed(4) : '∞';
+
+  document.getElementById('status').textContent =
+    k < 1 ? '● STABLE — POINT INSIDE CHART' : '⚠ |Γ| ≥ 1 — ACTIVE / UNSTABLE';
+  document.getElementById('status').style.color = k < 1 ? '#00aa55' : '#ff6644';
+}
+
+// Allow Enter key in inputs
+document.querySelectorAll('input').forEach(inp => {
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') plotPoint(); });
+});
+
+window.addEventListener('resize', resize);
+resize();
+// Plot default point on load
+setTimeout(plotPoint, 100);
+</script>
+</body>
+</html>
