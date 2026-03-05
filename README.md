@@ -4,7 +4,7 @@ An interactive Smith Chart plotter that runs entirely in the browser — no depe
 
 Originally written in C using Turbo C / BGI graphics. Rebuilt as a single HTML file using HTML5 Canvas.
 
-**[Live Demo →](https://YOUR-USERNAME.github.io/smith-chart/)**
+**[Live Demo →](https://patjan23.github.io/smith-chart/)**
 
 ---
 
